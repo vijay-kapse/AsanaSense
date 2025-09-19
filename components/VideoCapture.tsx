@@ -39,7 +39,7 @@ export default function VideoCapture({ videoRef }: { videoRef: React.RefObject<H
             <div className="inline-flex items-center space-x-2 bg-black/60 backdrop-blur-sm rounded-2xl px-4 py-2 border border-white/10">
               <div className="w-2 h-2 bg-cyan-400 rounded-full animate-pulse"></div>
               <p className="text-sm font-medium text-gray-300">
-                Say <span className="text-cyan-400 font-semibold">"analyze"</span> to start
+                Say <span className="text-cyan-400 font-semibold">"analyze"</span> or press the Analyze button to capture
               </p>
             </div>
           </motion.div>

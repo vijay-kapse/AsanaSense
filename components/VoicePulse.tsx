@@ -4,9 +4,23 @@ import { motion } from 'framer-motion'
 interface VoicePulseProps {
   isListening: boolean
   isProcessing: boolean
+  onCapture?: () => void
 }
 
-export default function VoicePulse({ isListening, isProcessing }: VoicePulseProps) {
+export default function VoicePulse({ isListening, isProcessing, onCapture }: VoicePulseProps) {
+  const handleClick = () => {
+    if (isProcessing) return
+    onCapture?.()
+  }
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (isProcessing || !onCapture) return
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      onCapture()
+    }
+  }
+
   return (
     <div className="flex flex-col items-center space-y-6">
       {/* Premium Voice Interface */}
@@ -45,13 +59,17 @@ export default function VoicePulse({ isListening, isProcessing }: VoicePulseProp
         
         {/* Main voice button */}
         <motion.div
+          role={onCapture ? 'button' : undefined}
+          tabIndex={onCapture ? 0 : -1}
+          onClick={handleClick}
+          onKeyDown={handleKeyDown}
           className={`relative w-20 h-20 rounded-2xl flex items-center justify-center backdrop-blur-xl border transition-all duration-500 ${
             isProcessing 
               ? 'bg-gradient-to-br from-orange-500/30 to-red-500/30 border-orange-400/50 shadow-orange-500/20' 
               : isListening 
                 ? 'bg-gradient-to-br from-cyan-500/30 to-blue-500/30 border-cyan-400/50 shadow-cyan-500/20' 
                 : 'bg-black/40 border-white/20 shadow-white/10'
-          }`}
+          } ${isProcessing ? 'cursor-not-allowed' : onCapture ? 'cursor-pointer' : ''}`}
           animate={{
             scale: isListening ? [1, 1.05, 1] : 1,
             boxShadow: isListening ? [
@@ -65,8 +83,8 @@ export default function VoicePulse({ isListening, isProcessing }: VoicePulseProp
             repeat: isListening ? Infinity : 0,
             ease: "easeInOut"
           }}
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.98 }}
+          whileHover={isProcessing ? undefined : { scale: 1.02 }}
+          whileTap={isProcessing ? undefined : { scale: 0.98 }}
         >
           <motion.div
             animate={{
@@ -123,6 +141,17 @@ export default function VoicePulse({ isListening, isProcessing }: VoicePulseProp
           </p>
         </div>
       </motion.div>
+
+      {onCapture && (
+        <button
+          type="button"
+          onClick={onCapture}
+          disabled={isProcessing}
+          className="btn-premium focus-premium disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          Analyze Pose
+        </button>
+      )}
     </div>
   )
 }

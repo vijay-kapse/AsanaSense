@@ -43,10 +43,10 @@ async def analyze_pose(file: UploadFile = File(...)):
         # Convert to PIL Image
         image = Image.open(io.BytesIO(contents))
         
-        # Convert to base64 for Gemini
+        # Convert to base64-encoded JPEG for Gemini
         buffered = io.BytesIO()
-        image.save(buffered, format="JPEG")
-        img_base64 = base64.b64encode(buffered.getvalue()).decode()
+        image.convert("RGB").save(buffered, format="JPEG")
+        image_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
         
         # Create the prompt for yoga pose analysis
         prompt = """
@@ -69,11 +69,15 @@ async def analyze_pose(file: UploadFile = File(...)):
             prompt,
             {
                 "mime_type": "image/jpeg",
-                "data": img_base64
+                "data": image_base64
             }
         ])
-        
-        feedback = response.text.strip()
+
+        feedback_text = response.text or ""
+        if not feedback_text.strip():
+            raise RuntimeError("Gemini returned an empty response")
+
+        feedback = feedback_text.strip()
         
         return JSONResponse(content={"feedback": feedback})
         

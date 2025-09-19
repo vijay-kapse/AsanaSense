@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import VideoCapture from '../components/VideoCapture'
 import FeedbackCard from '../components/FeedbackCard'
@@ -9,139 +9,237 @@ export default function Home() {
   const [feedback, setFeedback] = useState("")
   const [isListening, setIsListening] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
-  const [recognition, setRecognition] = useState<any>(null)
+  const [voiceEnabled, setVoiceEnabled] = useState(false)
+  const [speechSupported, setSpeechSupported] = useState(true)
+  const recognitionRef = useRef<SpeechRecognition | null>(null)
+  const voiceEnabledRef = useRef(false)
+  const isProcessingRef = useRef(false)
+
+  const speak = useCallback((text: string) => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      return
+    }
+
+    window.speechSynthesis.cancel()
+
+    const speech = new SpeechSynthesisUtterance(text)
+    speech.rate = 0.9
+    speech.pitch = 1.0
+    speech.volume = 0.8
+
+    const voices = window.speechSynthesis.getVoices()
+    const preferredVoice = voices.find(voice =>
+      voice.name.includes('Google') ||
+      voice.name.includes('Samantha') ||
+      voice.name.includes('Alex')
+    )
+
+    if (preferredVoice) {
+      speech.voice = preferredVoice
+    }
+
+    window.speechSynthesis.speak(speech)
+  }, [])
+
+  const captureFrame = useCallback(async () => {
+    const video = videoRef.current
+    if (!video || isProcessingRef.current) return
+
+    isProcessingRef.current = true
+    setIsProcessing(true)
+
+    try {
+      if (video.videoWidth === 0 || video.videoHeight === 0) {
+        await new Promise<void>((resolve) => {
+          const handleLoadedMetadata = () => {
+            video.removeEventListener('loadedmetadata', handleLoadedMetadata)
+            resolve()
+          }
+
+          video.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true })
+        })
+      }
+
+      const canvas = document.createElement('canvas')
+      const width = video.videoWidth || 1280
+      const height = video.videoHeight || 720
+      canvas.width = width
+      canvas.height = height
+      const ctx = canvas.getContext('2d')
+
+      if (!ctx) {
+        throw new Error('Unable to access canvas context')
+      }
+
+      ctx.drawImage(video, 0, 0, width, height)
+
+      const blob = await new Promise<Blob | null>((resolve) =>
+        canvas.toBlob(resolve, 'image/jpeg', 0.8)
+      )
+
+      if (!blob) {
+        throw new Error('Failed to capture image from video stream')
+      }
+
+      const formData = new FormData()
+      formData.append('file', blob, 'pose.jpg')
+
+      const res = await fetch('http://localhost:8000/analyze', {
+        method: 'POST',
+        body: formData
+      })
+
+      if (!res.ok) {
+        throw new Error(`HTTP error! status: ${res.status}`)
+      }
+
+      const data = await res.json()
+      speak(data.feedback)
+      setFeedback(data.feedback)
+    } catch (error) {
+      console.error('Error analyzing pose:', error)
+      const errorMessage = "Sorry, I couldn't analyze your pose right now. Please try again."
+      speak(errorMessage)
+      setFeedback(errorMessage)
+    } finally {
+      isProcessingRef.current = false
+      setIsProcessing(false)
+    }
+  }, [speak])
 
   useEffect(() => {
-    // Initialize camera
-    navigator.mediaDevices.getUserMedia({ 
-      video: { 
+    let isMounted = true
+    navigator.mediaDevices.getUserMedia({
+      video: {
         width: { ideal: 1280 },
         height: { ideal: 720 },
         facingMode: 'user'
-      } 
+      }
     }).then((stream) => {
-      if (videoRef.current) {
+      if (isMounted && videoRef.current) {
         videoRef.current.srcObject = stream
       }
     }).catch((err) => {
       console.error('Error accessing camera:', err)
     })
 
-    // Initialize speech recognition
-    if ('webkitSpeechRecognition' in window) {
-      const speechRecognition = new (window as any).webkitSpeechRecognition()
-      speechRecognition.continuous = true
-      speechRecognition.interimResults = false
-      speechRecognition.lang = 'en-US'
-
-      speechRecognition.onstart = () => {
-        setIsListening(true)
-      }
-
-      speechRecognition.onresult = (e: any) => {
-        const text = e.results[e.results.length - 1][0].transcript.toLowerCase()
-        console.log('Heard:', text)
-        if (text.includes("analyze") || text.includes("click") || text.includes("capture")) {
-          captureFrame()
-        }
-      }
-
-      speechRecognition.onerror = (e: any) => {
-        console.error('Speech recognition error:', e.error)
-        setIsListening(false)
-      }
-
-      speechRecognition.onend = () => {
-        setIsListening(false)
-        // Restart recognition after a short delay
-        setTimeout(() => {
-          if (speechRecognition) {
-            speechRecognition.start()
-          }
-        }, 100)
-      }
-
-      setRecognition(speechRecognition)
-      speechRecognition.start()
-    }
-
     return () => {
-      if (recognition) {
-        recognition.stop()
-      }
+      isMounted = false
+      const stream = videoRef.current?.srcObject as MediaStream | null
+      stream?.getTracks().forEach((track) => track.stop())
     }
   }, [])
 
-  async function captureFrame() {
-    if (!videoRef.current || isProcessing) return
-    
-    setIsProcessing(true)
-    
-    try {
-      const canvas = document.createElement("canvas")
-      const video = videoRef.current
-      canvas.width = video.videoWidth
-      canvas.height = video.videoHeight
-      const ctx = canvas.getContext("2d")!
-      ctx.drawImage(video, 0, 0)
-
-      canvas.toBlob(async (blob) => {
-        if (!blob) return
-
-        const formData = new FormData()
-        formData.append("file", blob, "pose.jpg")
-        
-        try {
-          // Use local backend instead of Next.js API
-          const res = await fetch("http://localhost:8000/analyze", { 
-            method: "POST", 
-            body: formData 
-          })
-          
-          if (!res.ok) {
-            throw new Error(`HTTP error! status: ${res.status}`)
-          }
-          
-          const data = await res.json()
-          speak(data.feedback)
-          setFeedback(data.feedback)
-        } catch (error) {
-          console.error('Error analyzing pose:', error)
-          const errorMessage = "Sorry, I couldn't analyze your pose right now. Please try again."
-          speak(errorMessage)
-          setFeedback(errorMessage)
-        } finally {
-          setIsProcessing(false)
-        }
-      }, 'image/jpeg', 0.8)
-    } catch (error) {
-      console.error('Error capturing frame:', error)
-      setIsProcessing(false)
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
     }
-  }
 
-  function speak(text: string) {
-    if ('speechSynthesis' in window) {
-      // Stop any ongoing speech
-      window.speechSynthesis.cancel()
-      
-      const speech = new SpeechSynthesisUtterance(text)
-      speech.rate = 0.9
-      speech.pitch = 1.0
-      speech.volume = 0.8
-      
-      // Try to use a more natural voice if available
-      const voices = window.speechSynthesis.getVoices()
-      const preferredVoice = voices.find(voice => 
-        voice.name.includes('Google') || 
-        voice.name.includes('Samantha') ||
-        voice.name.includes('Alex')
-      )
-      if (preferredVoice) {
-        speech.voice = preferredVoice
+    const SpeechRecognitionImpl = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition
+
+    if (!SpeechRecognitionImpl) {
+      console.warn('Speech recognition is not supported in this browser.')
+      setSpeechSupported(false)
+      return
+    }
+
+    const speechRecognition: SpeechRecognition = new SpeechRecognitionImpl()
+    setSpeechSupported(true)
+    speechRecognition.continuous = true
+    speechRecognition.interimResults = false
+    speechRecognition.lang = 'en-US'
+
+    speechRecognition.onstart = () => {
+      setIsListening(true)
+    }
+
+    speechRecognition.onresult = (e: SpeechRecognitionEvent) => {
+      const result = e.results[e.results.length - 1]
+      if (!result) return
+      const text = String(result[0].transcript || '').toLowerCase().trim()
+      console.log('Heard:', text)
+      if (
+        text.includes('analyze') ||
+        text.includes('analyse') ||
+        text.includes('click') ||
+        text.includes('capture') ||
+        text.includes('take picture') ||
+        text.includes('take photo')
+      ) {
+        captureFrame()
       }
-      
-      window.speechSynthesis.speak(speech)
+    }
+
+    speechRecognition.onerror = (event) => {
+      console.error('Speech recognition error:', event)
+      setIsListening(false)
+      voiceEnabledRef.current = false
+      setVoiceEnabled(false)
+    }
+
+    speechRecognition.onend = () => {
+      setIsListening(false)
+      if (voiceEnabledRef.current) {
+        try {
+          speechRecognition.start()
+        } catch (error) {
+          console.error('Failed to restart speech recognition:', error)
+        }
+      }
+    }
+
+    recognitionRef.current = speechRecognition
+
+    return () => {
+      voiceEnabledRef.current = false
+      recognitionRef.current = null
+      try {
+        speechRecognition.stop()
+      } catch (error) {
+        console.error('Error stopping speech recognition:', error)
+      }
+      speechRecognition.onstart = null
+      speechRecognition.onresult = null
+      speechRecognition.onerror = null
+      speechRecognition.onend = null
+    }
+  }, [captureFrame])
+
+  async function startListening() {
+    try {
+      // Request mic permission via user gesture
+      await navigator.mediaDevices.getUserMedia({ audio: true })
+      if (!speechSupported) {
+        console.warn('Speech recognition is not available in this browser.')
+        return
+      }
+
+      const recognition = recognitionRef.current
+
+      if (!recognition) {
+        console.warn('Speech recognition is not ready yet.')
+        return
+      }
+
+      voiceEnabledRef.current = true
+      setVoiceEnabled(true)
+
+      try {
+        recognition.stop()
+      } catch (error) {
+        // It's safe to ignore if recognition was not running yet
+      }
+      try {
+        recognition.start()
+      } catch (error) {
+        console.error('Failed to start speech recognition:', error)
+        voiceEnabledRef.current = false
+        setVoiceEnabled(false)
+      }
+    } catch (err) {
+      voiceEnabledRef.current = false
+      setVoiceEnabled(false)
+      console.error('Microphone permission error:', err)
     }
   }
 
@@ -254,6 +352,33 @@ export default function Home() {
                     </div>
                   </div>
                 </motion.div>
+
+                {/* Enable Voice Button (required by some browsers) */}
+                {speechSupported ? (
+                  !voiceEnabled && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 1.1 }}
+                    >
+                      <button
+                        onClick={startListening}
+                        className="btn-premium focus-premium"
+                      >
+                        Enable Voice
+                      </button>
+                    </motion.div>
+                  )
+                ) : (
+                  <motion.p
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 1.1 }}
+                    className="text-sm text-gray-400"
+                  >
+                    Voice commands are not supported in this browser. Use the mic button below to capture your pose manually.
+                  </motion.p>
+                )}
               </motion.div>
 
               {/* Right Column - Video Interface */}
@@ -272,7 +397,11 @@ export default function Home() {
                   transition={{ delay: 1.2, duration: 0.6 }}
                   className="absolute -bottom-16 left-1/2 transform -translate-x-1/2"
                 >
-                  <VoicePulse isListening={isListening} isProcessing={isProcessing} />
+                  <VoicePulse 
+                    isListening={isListening} 
+                    isProcessing={isProcessing} 
+                    onCapture={captureFrame}
+                  />
                 </motion.div>
               </motion.div>
             </div>
