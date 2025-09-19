@@ -5,6 +5,6 @@
     }
   },
   "env": {
-    "GEMINI_API_KEY": "AIzaSyA9vYU6kfpuUvwzAEyOe3ahU1cdPTpyLJk"
+    "GEMINI_API_KEY": "Your API key"
   }
 }
